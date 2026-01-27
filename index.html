@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>نظام تحليل نتائج الاختبارات المتعددة (مادة وحيدة)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap");
+      body {
+        font-family: "Tajawal", sans-serif;
+        background-color: #f8fafc;
+        color: #1e293b;
+      }
+
+      /* --- تنسيقات الطباعة الصارمة --- */
+      @media print {
+        @page {
+          size: A4;
+          margin: 0.5cm;
+        }
+        body {
+          background-color: white;
+          margin: 0;
+          padding: 0;
+        }
+
+        .no-print {
+          display: none !important;
+        }
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+
+        #printAllOverlay {
+          display: block !important;
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          min-height: 100vh;
+          z-index: 9999;
+          background: white;
+        }
+
+        body.print-single #printAllOverlay {
+          display: none !important;
+        }
+        body.print-single #mainInterface {
+          display: block !important;
+        }
+        body.print-all #mainInterface {
+          display: none !important;
+        }
+        body.print-all #printAllOverlay {
+          display: block !important;
+        }
+
+        /* إجبار التخطيط الشبكي (Side-by-Side) */
+        .force-row-print {
+          display: grid !important;
+          grid-template-columns: 1fr 1fr !important; /* عمودين متساويين */
+          gap: 1rem !important;
+          width: 100% !important;
+        }
+
+        table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+        }
+        td,
+        th {
+          border: 1px solid #ccc !important;
+          padding: 4px !important;
+        }
+        .page-break {
+          page-break-before: always;
+          display: block;
+          height: 1px;
+        }
+
+        .section-box {
+          box-shadow: none !important;
+          border: 1px solid #ccc !important;
+          margin-bottom: 10px !important;
+          padding: 10px !important;
+          break-inside: avoid;
+          background: white !important;
+        }
+
+        canvas {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+        .chart-container {
+          height: 200px !important;
+          width: 100% !important;
+          display: block !important;
+        }
+
+        input {
+          border: none !important;
+          background: transparent !important;
+          padding: 0 !important;
+        }
+      }
+
+      /* تنسيقات الشاشة */
+      .section-box {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.5rem;
+        border: 1px solid #e2e8f0;
+      }
+      .stat-card {
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        border: 1px solid #e2e8f0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .input-group label {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #475569;
+        margin-bottom: 0.25rem;
+      }
+      .input-group input,
+      .input-group select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .editable-title {
+        padding: 5px;
+        border-radius: 5px;
+        transition: background 0.3s;
+      }
+      .editable-title:hover {
+        background-color: #f1f5f9;
+        cursor: text;
+      }
+      .chart-container {
+        position: relative;
+        height: 18rem;
+        width: 100%;
+      }
+      #printAllOverlay {
+        display: none;
+      }
+
+      /* كلاس للمساعدة في العرض جنباً إلى جنب في الشاشة أيضاً */
+      .force-row-print {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+      @media (max-width: 768px) {
+        .force-row-print {
+          grid-template-columns: 1fr;
+        } /* عمود واحد للجوال */
+      }
+    </style>
+  </head>
+  <body class="p-4 md:p-8" onload="loadSavedData()">
+    <div
+      id="mainInterface"
+      class="max-w-5xl mx-auto bg-white min-h-screen md:p-8 rounded-xl shadow-sm"
+    >
+      <!-- HEADER START -->
+      <div
+        class="max-w-5xl mx-auto bg-white rounded-xl shadow border border-slate-300 no-print mb-6"
+      >
+        <div
+          class="bg-slate-800 p-4 text-white rounded-t-xl flex justify-between items-center"
+        >
+          <h1 class="font-bold text-lg flex items-center gap-2">
+            <i class="fa-solid fa-chart-pie text-yellow-400"></i>
+            نظام تحليل نتائج الاختبارات المتعددة
+            <span
+              class="text-xs bg-yellow-500 text-slate-900 px-2 py-0.5 rounded-full mr-2"
+            >
+              مادة وحيدة</span
+            >
+          </h1>
+        </div>
+      </div>
+      <!-- HEADER END -->
+      <div
+        class="no-print bg-slate-50 p-6 rounded-xl border border-slate-200 mb-8 relative"
+      >
+        <div class="absolute top-4 left-4 flex gap-2">
+          <button
+            onclick="saveData()"
+            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition-all flex items-center"
+          >
+            <i class="fas fa-save ml-2"></i> حفظ
+          </button>
+          <button
+            onclick="resetAnalysis()"
+            class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition-all flex items-center"
+          >
+            <i class="fas fa-trash-alt ml-2"></i> جديد
+          </button>
+        </div>
+
+        <h1 class="text-xl font-black text-blue-900 mb-6 flex items-center">
+          <i class="fas fa-sliders-h ml-2 text-blue-600"></i>لوحة التحكم
+        </h1>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div class="input-group">
+            <label>ملف البيانات (Excel/CSV)</label>
+            <input
+              type="file"
+              id="fileInput"
+              accept=".xlsx, .xls, .csv"
+              class="file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
+            />
+          </div>
+          <div id="colSelectorContainer" class="hidden input-group">
+            <label class="text-blue-700">تغيير الاختبار المعروض:</label>
+            <select
+              id="columnSelector"
+              class="w-full p-2 border-2 border-blue-200 rounded-lg bg-white text-blue-700 font-bold outline-none"
+              onchange="switchColumn()"
+            ></select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div class="input-group">
+            <label>إدارة التعليم</label
+            ><input
+              type="text"
+              id="inAdmin"
+              placeholder="مثال: الرياض"
+              oninput="syncData()"
+            />
+          </div>
+          <div class="input-group">
+            <label>المدرسة</label
+            ><input
+              type="text"
+              id="inSchool"
+              placeholder="اسم المدرسة"
+              oninput="syncData()"
+            />
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4 mb-4">
+          <div class="input-group">
+            <label>العام الدراسي</label
+            ><input
+              type="text"
+              id="inYear"
+              value="1447هـ"
+              oninput="syncData()"
+            />
+          </div>
+          <div class="input-group">
+            <label>الفصل الدراسي</label
+            ><input
+              type="text"
+              id="inSemester"
+              value="الثاني"
+              oninput="syncData()"
+            />
+          </div>
+          <div class="input-group">
+            <label>اسم المادة</label
+            ><input
+              type="text"
+              id="inSubject"
+              placeholder="مثال: الرياضيات"
+              oninput="syncData()"
+            />
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          <div class="input-group">
+            <label>المعلم/ـة</label
+            ><input
+              type="text"
+              id="inTeacher"
+              placeholder="الاسم"
+              oninput="syncData()"
+            />
+          </div>
+          <div class="input-group">
+            <label>مدير/ة المدرسة</label
+            ><input
+              type="text"
+              id="inPrincipal"
+              placeholder="الاسم"
+              oninput="syncData()"
+            />
+          </div>
+          <div class="input-group">
+            <label>الفصل/الصف</label
+            ><input
+              type="text"
+              id="inClass"
+              placeholder="مثال: 3/1"
+              oninput="syncData()"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div id="reportArea" class="hidden">
+        <header
+          id="mainHeader"
+          class="header-print mb-6 border-b-2 border-black pb-2 w-full"
+        >
+          <div class="flex justify-between items-start mb-2 w-full">
+            <div class="text-center w-1/3 pt-2">
+              <p class="font-bold text-sm mb-1">المملكة العربية السعودية</p>
+              <p class="font-bold text-sm mb-1">وزارة التعليم</p>
+              <p class="font-bold text-sm mb-1">
+                إدارة التعليم: <span id="outAdmin">.......</span>
+              </p>
+              <p class="font-bold text-sm">
+                مدرسة: <span id="outSchool">.......</span>
+              </p>
+            </div>
+            <div
+              class="text-center w-1/3 flex flex-col items-center justify-center"
+            >
+              <div class="mb-2">
+                <i
+                  class="fas fa-chart-bar text-4xl text-slate-800 border-2 border-slate-800 p-2 rounded-full"
+                ></i>
+              </div>
+              <div class="text-sm font-black text-slate-800 mt-1">
+                المادة: <span id="outSubjectName">.......</span>
+              </div>
+            </div>
+            <div class="text-center w-1/3 pt-2 font-bold text-sm">
+              <p class="mb-1">
+                العام الدراسي: <span id="outYear">1447هـ</span>
+              </p>
+              <p class="mb-1">
+                الفصل الدراسي: <span id="outSemester">الثاني</span>
+              </p>
+              <p class="mb-1">الصف: <span id="outClass">.......</span></p>
+              <p>العدد: <span id="outCountHeader">0</span></p>
+            </div>
+          </div>
+          <div class="text-center mt-4 mb-2">
+            <h2
+              class="text-xl font-black text-black underline decoration-2 underline-offset-8 editable-title"
+              contenteditable="true"
+            >
+              نظام تحليل نتائج الاختبارات المتعددة
+            </h2>
+          </div>
+        </header>
+
+        <div
+          id="comparisonSection"
+          class="section-box bg-slate-50 border-2 border-dashed border-slate-300"
+        ></div>
+
+        <div class="section-box">
+          <h3
+            id="statsTitle"
+            class="font-bold text-black mb-3 border-r-4 border-blue-600 pr-2 text-sm"
+          >
+            المؤشرات الإحصائية للاختبار الحالي
+          </h3>
+          <div class="grid grid-cols-4 lg:grid-cols-8 gap-2">
+            <div class="stat-card bg-slate-100">
+              <div class="text-[10px] text-slate-500 font-bold">
+                الدرجة الكلية
+              </div>
+              <div
+                id="statTotalScore"
+                class="text-lg font-black text-slate-800"
+              >
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-blue-50">
+              <div class="text-[10px] text-slate-500 font-bold">المتوسط</div>
+              <div id="statMean" class="text-lg font-black text-blue-700">
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-indigo-50">
+              <div class="text-[10px] text-slate-500 font-bold">الوسيط</div>
+              <div id="statMedian" class="text-lg font-black text-indigo-700">
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-purple-50">
+              <div class="text-[10px] text-slate-500 font-bold">المنوال</div>
+              <div id="statMode" class="text-lg font-black text-purple-700">
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-teal-50">
+              <div class="text-[10px] text-slate-500 font-bold">الانحراف</div>
+              <div id="statStd" class="text-lg font-black text-teal-700">-</div>
+            </div>
+            <div class="stat-card bg-green-50">
+              <div class="text-[10px] text-slate-500 font-bold">
+                نسبة الاجتياز
+              </div>
+              <div id="statPassRate" class="text-lg font-black text-green-700">
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-orange-50">
+              <div class="text-[10px] text-slate-500 font-bold">أعلى درجة</div>
+              <div id="statMax" class="text-lg font-black text-orange-700">
+                -
+              </div>
+            </div>
+            <div class="stat-card bg-red-50">
+              <div class="text-[10px] text-slate-500 font-bold">أقل درجة</div>
+              <div id="statMin" class="text-lg font-black text-red-700">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="force-row-print mb-4">
+          <div class="section-box h-full">
+            <h3
+              class="font-bold text-black mb-2 border-r-4 border-blue-800 pr-2 text-sm"
+            >
+              التمثيل البياني للمستويات
+            </h3>
+            <div class="chart-container"><canvas id="mainChart"></canvas></div>
+          </div>
+          <div class="section-box h-full">
+            <h3
+              class="font-bold text-black mb-2 border-r-4 border-green-700 pr-2 text-sm"
+            >
+              جدول توزيع المستويات
+            </h3>
+            <table class="w-full text-xs border-collapse">
+              <thead>
+                <tr class="bg-slate-100 text-slate-800">
+                  <th class="p-2 border">المستوى</th>
+                  <th class="p-2 border text-center">المدى</th>
+                  <th class="p-2 border text-center">العدد</th>
+                  <th class="p-2 border text-center">النسبة</th>
+                </tr>
+              </thead>
+              <tbody id="tblRatings"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-box">
+          <h3
+            class="font-bold text-black mb-2 border-r-4 border-purple-600 pr-2 text-sm"
+          >
+            التحليل الوصفي للنتائج
+          </h3>
+          <div
+            id="narrativeReport"
+            class="text-xs leading-loose text-justify text-slate-800 font-medium"
+          ></div>
+        </div>
+
+        <div class="force-row-print gap-4">
+          <div class="section-box">
+            <h3 class="font-bold text-green-800 mb-2 text-sm border-b pb-1">
+              الطلاب المتميزون
+            </h3>
+            <table class="w-full text-[11px]">
+              <tbody id="tableTop"></tbody>
+            </table>
+          </div>
+          <div class="section-box">
+            <h3 class="font-bold text-red-800 mb-2 text-sm border-b pb-1">
+              طلاب بحاجة لدعم
+            </h3>
+            <table class="w-full text-[11px]">
+              <tbody id="tableBottom"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <footer
+          id="mainFooter"
+          class="footer-print mt-8 pt-4 border-t-2 border-black"
+        >
+          <div
+            class="flex justify-around items-start text-center font-bold text-sm px-4"
+          >
+            <div class="w-1/2">
+              <p class="mb-8">معلم/ـة المادة</p>
+              <p id="signTeacher">....................</p>
+            </div>
+            <div class="w-1/2">
+              <p class="mb-8">مدير/ة المدرسة</p>
+              <p id="outPrincipal">....................</p>
+            </div>
+          </div>
+          <div class="text-center mt-6 text-[10px] text-slate-400 no-print">
+            نظام التحليل الآلي V14.0
+          </div>
+        </footer>
+
+        <div class="no-print mt-8 text-center pb-8 flex justify-center gap-4">
+          <button
+            onclick="printSingleReport()"
+            class="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-black transition-all shadow-lg flex items-center"
+          >
+            <i class="fas fa-print ml-2"></i> طباعة التقرير الحالي
+          </button>
+          <button
+            onclick="printComparisonReport()"
+            class="bg-blue-700 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-900 transition-all shadow-lg flex items-center"
+          >
+            <i class="fas fa-chart-line ml-2"></i> طباعة تحليل المقارنة فقط
+          </button>
+          <button
+            onclick="printAllReports()"
+            class="bg-green-700 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-900 transition-all shadow-lg flex items-center"
+          >
+            <i class="fas fa-layer-group ml-2"></i> طباعة الملف الشامل (جميع
+            الاختبارات)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="no-print mt-10 mb-6 text-center" dir="rtl">
+      <div class="footer-credits text-sm font-semibold text-slate-700">
+        تم الإنشاء والبرمجة والتطوير بواسطة:
+        <a
+          href="https://gemini.google.com/"
+          target="_blank"
+          class="text-blue-600 hover:underline"
+          >Gemini 2.0</a
+        >
+        <span class="mx-1 text-slate-400">|</span>
+        <a
+          href="https://deepmind.google/"
+          target="_blank"
+          class="text-blue-600 hover:underline"
+          >Antigravity</a
+        >
+        <span class="mx-2 text-slate-300">|</span>
+        <a
+          href="https://t.me/Interact2030"
+          target="_blank"
+          class="text-blue-600 hover:underline"
+          >حقوق التطوير محفوظة للملتقى التعليمي التفاعلي</a
+        >
+      </div>
+    </footer>
+
+    <div id="printAllOverlay" class="bg-white p-4"></div>
+
+    <script>
+      let allStudentsData = [];
+      let scoreColumns = [];
+      let myChart = null;
+      let compChart = null;
+
+      function saveData() {
+        const data = {
+          admin: document.getElementById("inAdmin").value,
+          school: document.getElementById("inSchool").value,
+          teacher: document.getElementById("inTeacher").value,
+          principal: document.getElementById("inPrincipal").value,
+          year: document.getElementById("inYear").value,
+          semester: document.getElementById("inSemester").value,
+          subject: document.getElementById("inSubject").value,
+          class: document.getElementById("inClass").value,
+        };
+        localStorage.setItem("analysisDataV14", JSON.stringify(data));
+        alert("تم الحفظ بنجاح.");
+      }
+
+      function loadSavedData() {
+        const saved = localStorage.getItem("analysisDataV14");
+        if (saved) {
+          const data = JSON.parse(saved);
+          document.getElementById("inAdmin").value = data.admin || "";
+          document.getElementById("inSchool").value = data.school || "";
+          document.getElementById("inTeacher").value = data.teacher || "";
+          document.getElementById("inPrincipal").value = data.principal || "";
+          document.getElementById("inYear").value = data.year || "1447هـ";
+          document.getElementById("inSemester").value =
+            data.semester || "الثاني";
+          document.getElementById("inSubject").value = data.subject || "";
+          document.getElementById("inClass").value = data.class || "";
+          syncData();
+        }
+      }
+
+      function resetAnalysis() {
+        if (confirm("هل أنت متأكد من بدء تحليل جديد؟")) {
+          document.getElementById("fileInput").value = "";
+          document.getElementById("reportArea").classList.add("hidden");
+          document
+            .getElementById("colSelectorContainer")
+            .classList.add("hidden");
+          allStudentsData = [];
+          scoreColumns = [];
+          document.getElementById("printAllOverlay").innerHTML = "";
+        }
+      }
+
+      function syncData() {
+        const v = (id) => document.getElementById(id).value;
+        const s = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) el.innerText = val || ".......";
+        };
+
+        s("outAdmin", v("inAdmin"));
+        s("outSchool", v("inSchool"));
+        s("signTeacher", v("inTeacher"));
+        s("outPrincipal", v("inPrincipal"));
+        s("outYear", v("inYear"));
+        s("outSemester", v("inSemester"));
+        s("outClass", v("inClass"));
+        s("outSubjectName", v("inSubject"));
+      }
+
+      document
+        .getElementById("fileInput")
+        .addEventListener("change", function (e) {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = function (e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+            const rows = XLSX.utils.sheet_to_json(
+              workbook.Sheets[workbook.SheetNames[0]],
+              { header: 1 },
+            );
+            processData(rows);
+          };
+          reader.readAsArrayBuffer(file);
+        });
+
+      function processData(rows) {
+        try {
+          let nameIdx = -1,
+            foundScores = [],
+            headerRowIdx = -1;
+          for (let i = 0; i < Math.min(rows.length, 30); i++) {
+            const row = rows[i];
+            let isHeader = false;
+            row.forEach((cell) => {
+              if (
+                cell &&
+                (cell.toString().includes("اسم") ||
+                  cell.toString().includes("الطالب"))
+              )
+                isHeader = true;
+            });
+            if (isHeader) {
+              headerRowIdx = i;
+              row.forEach((cell, idx) => {
+                if (!cell) return;
+                const s = cell.toString().trim();
+                if (s.includes("اسم") || s.includes("الطالب")) nameIdx = idx;
+                if (
+                  s.includes("مجموع") ||
+                  s.includes("درجة") ||
+                  s.includes("نافس") ||
+                  s.includes("اختبار")
+                ) {
+                  let maxVal = 100;
+                  if (
+                    headerRowIdx > 0 &&
+                    rows[headerRowIdx - 1] &&
+                    rows[headerRowIdx - 1][idx]
+                  ) {
+                    let m = parseFloat(
+                      rows[headerRowIdx - 1][idx]
+                        .toString()
+                        .replace(/[^0-9.]/g, ""),
+                    );
+                    if (!isNaN(m) && m > 0) maxVal = m;
+                  }
+                  foundScores.push({ idx, name: s, max: maxVal });
+                }
+              });
+              break;
+            }
+          }
+          if (nameIdx === -1 || foundScores.length === 0) {
+            alert("لم يتم العثور على أعمدة البيانات الصحيحة.");
+            return;
+          }
+
+          allStudentsData = [];
+          for (let i = headerRowIdx + 1; i < rows.length; i++) {
+            if (!rows[i][nameIdx]) continue;
+            const n = rows[i][nameIdx].toString();
+            if (
+              n.includes("المتوسط") ||
+              n.includes("النسبة") ||
+              n.includes("Total") ||
+              n.includes("الدرجة الكلية")
+            )
+              continue;
+            let student = { name: n, scores: {} };
+            foundScores.forEach((col) => {
+              let val = parseFloat(rows[i][col.idx]);
+              student.scores[col.name] = isNaN(val) ? 0 : val;
+            });
+            allStudentsData.push(student);
+          }
+          scoreColumns = foundScores;
+          setupUI();
+          generateReport(scoreColumns[0].name);
+        } catch (err) {
+          alert("حدث خطأ أثناء المعالجة: " + err.message);
+        }
+      }
+
+      function setupUI() {
+        const selector = document.getElementById("columnSelector");
+        selector.innerHTML = "";
+        scoreColumns.forEach((c) => {
+          const opt = document.createElement("option");
+          opt.value = c.name;
+          opt.innerText = c.name;
+          selector.appendChild(opt);
+        });
+        document
+          .getElementById("colSelectorContainer")
+          .classList.remove("hidden");
+        document.getElementById("reportArea").classList.remove("hidden");
+        updateComparisonTable();
+      }
+
+      function updateComparisonTable() {
+        let totalStudentSum = 0,
+          totalMaxSum = 0,
+          examNames = [],
+          passRates = [];
+        let html = `<h3 class="font-bold text-blue-900 mb-3 text-sm px-2"><i class="fas fa-list-ol ml-2"></i>جدول مقارنة أداء الاختبارات</h3>
+                    <div class="overflow-x-auto"><table class="w-full text-center border-collapse text-[11px]">
+                    <thead class="bg-blue-700 text-white"><tr>
+                        <th class="p-2 border">الاختبار</th><th class="p-2 border bg-blue-800">الكلية</th><th class="p-2 border">المتوسط</th>
+                        <th class="p-2 border">الاجتياز</th><th class="p-2 border">الأعلى</th><th class="p-2 border">الأقل</th>
+                    </tr></thead><tbody>`;
+        scoreColumns.forEach((col) => {
+          const scores = allStudentsData.map((s) => s.scores[col.name]);
+          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+          const maxScore = Math.max(...scores);
+          const minScore = Math.min(...scores);
+          const passRate = (
+            (scores.filter((s) => s >= col.max * 0.5).length / scores.length) *
+            100
+          ).toFixed(1);
+          totalStudentSum += scores.reduce((a, b) => a + b, 0);
+          totalMaxSum += scores.length * col.max;
+          examNames.push(col.name);
+          passRates.push(passRate);
+          html += `<tr class="bg-white hover:bg-blue-50 cursor-pointer border-b" onclick="document.getElementById('columnSelector').value='${col.name}'; switchColumn();">
+                    <td class="p-2 border font-bold">${col.name}</td><td class="p-2 border font-bold text-blue-900 bg-blue-50">${col.max}</td>
+                    <td class="p-2 border">${avg.toFixed(1)}</td><td class="p-2 border ${passRate < 50 ? "text-red-600" : "text-green-700"} font-bold">${passRate}%</td>
+                    <td class="p-2 border">${maxScore}</td><td class="p-2 border">${minScore}</td></tr>`;
+        });
+        const globalPerc =
+          totalMaxSum > 0
+            ? ((totalStudentSum / totalMaxSum) * 100).toFixed(1)
+            : 0;
+        html += `<tr class="bg-slate-200 font-bold border-t-2 border-slate-400"><td class="p-2 border text-slate-800">المؤشر العام</td><td class="p-2 border">-</td><td class="p-2 border">-</td><td class="p-2 border text-blue-900 font-black text-sm">${globalPerc}%</td><td colspan="2" class="p-2 border text-slate-500 text-[10px]">نسبة الأداء الكلي</td></tr></tbody></table></div>`;
+        html += `<div class="mt-4 mb-4 border rounded-lg p-3 bg-white"><h4 class="font-bold text-slate-700 text-xs mb-2 border-r-4 border-green-600 pr-2">تطور نسبة الاجتياز</h4><div class="chart-container"><canvas id="compChart"></canvas></div></div>`;
+
+        let generalDesc =
+          globalPerc >= 90
+            ? "أداء استثنائي ومتميز."
+            : globalPerc >= 80
+              ? "مستوى متقدم."
+              : globalPerc >= 70
+                ? "مستوى جيد."
+                : globalPerc >= 50
+                  ? "مستوى متوسط."
+                  : "مستوى منخفض.";
+        html += `<div class="mt-2 p-3 bg-white border border-blue-200 rounded-lg shadow-sm"><h4 class="font-bold text-blue-800 text-xs mb-1 border-b pb-1"><i class="fas fa-chart-line ml-1"></i> وصف المؤشر العام (${globalPerc}%)</h4><p class="text-[11px] text-slate-800 leading-relaxed text-justify">المستوى العام للمجموعة: <b>${generalDesc}</b></p></div>`;
+
+        document.getElementById("comparisonSection").innerHTML = html;
+        renderCompChart(examNames, passRates, "compChart");
+      }
+
+      function renderCompChart(labels, data, canvasId) {
+        setTimeout(() => {
+          const ctx = document.getElementById(canvasId);
+          if (!ctx) return;
+          if (canvasId === "compChart" && compChart) compChart.destroy();
+
+          new Chart(ctx, {
+            type: "line",
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: "نسبة الاجتياز (%)",
+                  data: data,
+                  borderColor: "#16a34a",
+                  backgroundColor: "rgba(22, 163, 74, 0.1)",
+                  borderWidth: 2,
+                  pointBackgroundColor: "#fff",
+                  pointBorderColor: "#166534",
+                  pointRadius: 4,
+                  fill: true,
+                  tension: 0.3,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: { duration: 0 },
+              plugins: {
+                legend: { display: false },
+                datalabels: {
+                  align: "top",
+                  color: "#15803d",
+                  font: { weight: "bold", size: 10 },
+                  formatter: (val) => val + "%",
+                },
+              },
+              scales: {
+                y: { beginAtZero: true, max: 100, ticks: { stepSize: 20 } },
+                x: { grid: { display: false } },
+              },
+            },
+            plugins: [ChartDataLabels],
+          });
+        }, 300);
+      }
+
+      function switchColumn() {
+        generateReport(document.getElementById("columnSelector").value);
+      }
+
+      function generateReport(colName) {
+        const colInfo = scoreColumns.find((c) => c.name === colName);
+        let maxPossible = colInfo.max;
+
+        document.getElementById("statsTitle").innerHTML =
+          `المؤشرات الإحصائية للاختبار: <span class="text-blue-800">${colName}</span>`;
+        document.getElementById("statTotalScore").innerText = maxPossible;
+
+        const scores = allStudentsData
+          .map((s) => s.scores[colName])
+          .sort((a, b) => a - b);
+        const count = scores.length;
+        document.getElementById("outCountHeader").innerText = count;
+
+        const mean = scores.reduce((a, b) => a + b, 0) / count;
+        const median =
+          count % 2 === 0
+            ? (scores[count / 2 - 1] + scores[count / 2]) / 2
+            : scores[Math.floor(count / 2)];
+        const stdDev = Math.sqrt(
+          scores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / count,
+        );
+
+        const modeMap = {};
+        let maxFreq = 0;
+        let mode = scores[0];
+        scores.forEach((x) => {
+          modeMap[x] = (modeMap[x] || 0) + 1;
+          if (modeMap[x] > maxFreq) {
+            maxFreq = modeMap[x];
+            mode = x;
+          }
+        });
+
+        document.getElementById("statMean").innerText = mean.toFixed(1);
+        document.getElementById("statMedian").innerText = median.toFixed(1);
+        document.getElementById("statMode").innerText = mode;
+        document.getElementById("statStd").innerText = stdDev.toFixed(1);
+
+        const passCount = scores.filter((s) => s >= maxPossible * 0.5).length;
+        const passRate = ((passCount / count) * 100).toFixed(1);
+        document.getElementById("statPassRate").innerText = passRate + "%";
+        document.getElementById("statMax").innerText = scores[count - 1];
+        document.getElementById("statMin").innerText = scores[0];
+
+        const levels = [
+          { name: "متميز", range: "90% - 100%", min: 0.9, color: "#16a34a" },
+          { name: "متقدم", range: "80% - 89%", min: 0.8, color: "#2563eb" },
+          { name: "متمكن", range: "65% - 79%", min: 0.65, color: "#ca8a04" },
+          { name: "مقبول", range: "50% - 64%", min: 0.5, color: "#ea580c" },
+          { name: "غير مجتاز", range: "أقل من 50%", min: 0, color: "#dc2626" },
+        ];
+
+        let chartData = [];
+        let tableHtml = "";
+        levels.forEach((lvl, idx) => {
+          const lower = maxPossible * lvl.min;
+          const upper =
+            idx === 0 ? maxPossible + 1 : maxPossible * levels[idx - 1].min;
+          const cnt = scores.filter((s) => s >= lower && s < upper).length;
+          const perc = ((cnt / count) * 100).toFixed(1);
+          chartData.push({ label: lvl.name, count: cnt, color: lvl.color });
+          tableHtml += `<tr class="border-b text-center"><td class="p-1 border-r-4 font-bold text-right" style="border-color:${lvl.color}">${lvl.name}</td><td class="p-1 text-slate-500">${Math.ceil(lower)} - ${idx === 0 ? maxPossible : Math.ceil(upper - 0.1)}</td><td class="p-1 font-bold">${cnt}</td><td class="p-1">${perc}%</td></tr>`;
+        });
+        document.getElementById("tblRatings").innerHTML = tableHtml;
+
+        let narrative = `في اختبار <b>${colName}</b>، والبالغ درجته الكلية (<b>${maxPossible}</b>)، حقق الطلاب متوسطاً حسابياً قدره (<b>${mean.toFixed(1)}</b>) ونسبة اجتياز (<b>${passRate}%</b>). `;
+        narrative +=
+          passRate >= 75
+            ? "وهذا يعكس مستوى جيد جداً من الاستيعاب. "
+            : "وهناك حاجة لخطط علاجية. ";
+        document.getElementById("narrativeReport").innerHTML = narrative;
+
+        const sorted = [...allStudentsData].sort(
+          (a, b) => b.scores[colName] - a.scores[colName],
+        );
+        document.getElementById("tableTop").innerHTML = sorted
+          .slice(0, 5)
+          .map(
+            (s) =>
+              `<tr class="border-b"><td>${s.name}</td><td class="font-bold text-green-700 text-left">${s.scores[colName]}</td></tr>`,
+          )
+          .join("");
+        document.getElementById("tableBottom").innerHTML = sorted
+          .filter((s) => s.scores[colName] < maxPossible * 0.5)
+          .slice(0, 5)
+          .map(
+            (s) =>
+              `<tr class="border-b"><td>${s.name}</td><td class="font-bold text-red-600 text-left">${s.scores[colName]}</td></tr>`,
+          )
+          .join("");
+
+        updateChart(chartData);
+      }
+
+      function updateChart(data) {
+        const ctx = document.getElementById("mainChart").getContext("2d");
+        if (myChart) myChart.destroy();
+        myChart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels: data.map((d) => d.label),
+            datasets: [
+              {
+                data: data.map((d) => d.count),
+                backgroundColor: data.map((d) => d.color),
+                barPercentage: 0.6,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              datalabels: {
+                color: "#000",
+                anchor: "end",
+                align: "top",
+                font: { weight: "bold" },
+              },
+            },
+            scales: {
+              y: { display: false, beginAtZero: true },
+              x: { grid: { display: false } },
+            },
+          },
+          plugins: [ChartDataLabels],
+        });
+      }
+
+      function printSingleReport() {
+        document.body.classList.add("print-single");
+        setTimeout(() => {
+          window.print();
+          document.body.classList.remove("print-single");
+        }, 300);
+      }
+
+      function printComparisonReport() {
+        if (scoreColumns.length === 0) return alert("لا توجد بيانات للطباعة");
+
+        document.body.classList.add("print-all"); // Reuse overlay logic
+
+        const overlay = document.getElementById("printAllOverlay");
+        overlay.innerHTML = "";
+
+        // Get Components
+        const compHTML = document.getElementById("comparisonSection").innerHTML;
+
+        // Prepare Header
+        let headerHTML = document.getElementById("mainHeader").outerHTML;
+        headerHTML = headerHTML.replace(/id="[^"]*"/g, "");
+        headerHTML = headerHTML.replace(
+          /<div class="text-sm font-black.*<\/div>/,
+          '<div class="text-lg font-black text-center mt-2 bg-slate-100 p-2 rounded">تقرير تحليل مقارنة الأداء</div>',
+        );
+
+        // Prepare Footer
+        const footerHTML = document.getElementById("mainFooter").innerHTML;
+
+        // Build Page
+        const page = document.createElement("div");
+        page.className = "print-page";
+        page.innerHTML =
+          headerHTML +
+          '<div class="mt-8">' +
+          compHTML +
+          "</div>" +
+          '<div class="mt-12 border-t-2 border-black pt-4">' +
+          footerHTML +
+          "</div>";
+
+        overlay.appendChild(page);
+
+        // Render Chart
+        const coverContainer = page.querySelector(".chart-container");
+        if (coverContainer) {
+          // Fix: Set explicit dimensions for the canvas to ensure it fills the page in print
+          coverContainer.innerHTML =
+            '<canvas id="printCompChart_Only" width="1200" height="400" style="width: 100%; height: auto;"></canvas>';
+
+          let examNames = [],
+            passRates = [];
+          scoreColumns.forEach((col) => {
+            const scores = allStudentsData.map((s) => s.scores[col.name]);
+            const passRate = (
+              (scores.filter((s) => s >= col.max * 0.5).length /
+                scores.length) *
+              100
+            ).toFixed(1);
+            examNames.push(col.name);
+            passRates.push(passRate);
+          });
+
+          new Chart(document.getElementById("printCompChart_Only"), {
+            type: "line",
+            data: {
+              labels: examNames,
+              datasets: [
+                {
+                  label: "الاجتياز",
+                  data: passRates,
+                  borderColor: "#16a34a",
+                  backgroundColor: "rgba(22, 163, 74, 0.1)",
+                  borderWidth: 2,
+                  fill: true,
+                  tension: 0.3,
+                },
+              ],
+            },
+            options: {
+              responsive: false,
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: {
+                legend: { display: false },
+                datalabels: {
+                  align: "top",
+                  color: "#15803d",
+                  font: { weight: "bold" },
+                },
+              },
+              scales: {
+                y: { beginAtZero: true, max: 100 },
+                x: { display: false },
+              },
+            },
+            plugins: [ChartDataLabels],
+          });
+        }
+
+        setTimeout(() => {
+          window.print();
+          document.body.classList.remove("print-all");
+        }, 1500);
+      }
+
+      function printAllReports() {
+        if (scoreColumns.length === 0) return alert("لا توجد بيانات للطباعة");
+
+        // 1. Show overlay immediately to ensure charts render with correct dimensions
+        document.body.classList.add("print-all");
+
+        const overlay = document.getElementById("printAllOverlay");
+        overlay.innerHTML = "";
+
+        // 1. الصفحة الأولى: الغلاف الشامل
+        const compHTML = document.getElementById("comparisonSection").innerHTML;
+
+        let headerHTML = document.getElementById("mainHeader").outerHTML;
+        headerHTML = headerHTML.replace(/id="[^"]*"/g, "");
+        headerHTML = headerHTML.replace(
+          /<div class="text-sm font-black.*<\/div>/,
+          '<div class="text-lg font-black text-center mt-2 bg-slate-100 p-2 rounded">تقرير الأداء الشامل لجميع الاختبارات</div>',
+        );
+
+        const page1 = document.createElement("div");
+        page1.className = "print-page";
+        page1.innerHTML =
+          headerHTML +
+          '<div class="mt-8" id="printCoverContent">' +
+          compHTML +
+          "</div>" +
+          '<div class="page-break"></div>';
+
+        overlay.appendChild(page1);
+
+        // تنظيف وإعادة رسم تشارت الغلاف
+        const coverContainer = page1.querySelector(".chart-container");
+        if (coverContainer) {
+          // Fix: Set explicit dimensions
+          coverContainer.innerHTML =
+            '<canvas id="printCompChart_Final" width="1200" height="400" style="width: 100%; height: auto;"></canvas>';
+
+          let examNames = [],
+            passRates = [];
+          scoreColumns.forEach((col) => {
+            const scores = allStudentsData.map((s) => s.scores[col.name]);
+            const passRate = (
+              (scores.filter((s) => s >= col.max * 0.5).length /
+                scores.length) *
+              100
+            ).toFixed(1);
+            examNames.push(col.name);
+            passRates.push(passRate);
+          });
+
+          new Chart(document.getElementById("printCompChart_Final"), {
+            type: "line",
+            data: {
+              labels: examNames,
+              datasets: [
+                {
+                  label: "الاجتياز",
+                  data: passRates,
+                  borderColor: "#16a34a",
+                  backgroundColor: "rgba(22, 163, 74, 0.1)",
+                  borderWidth: 2,
+                  fill: true,
+                  tension: 0.3,
+                },
+              ],
+            },
+            options: {
+              responsive: false, // Critical Fix: Disable responsiveness to force rendering
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: {
+                legend: { display: false },
+                datalabels: {
+                  align: "top",
+                  color: "#15803d",
+                  font: { weight: "bold" },
+                },
+              },
+              scales: {
+                y: { beginAtZero: true, max: 100 },
+                x: { display: false },
+              },
+            },
+            plugins: [ChartDataLabels],
+          });
+        }
+
+        // 2. الصفحات التالية
+        scoreColumns.forEach((col, idx) => {
+          const scores = allStudentsData
+            .map((s) => s.scores[col.name])
+            .sort((a, b) => a - b);
+          const count = scores.length;
+          const mean = (scores.reduce((a, b) => a + b, 0) / count).toFixed(1);
+          const passCount = scores.filter((s) => s >= col.max * 0.5).length;
+          const passRate = ((passCount / count) * 100).toFixed(1);
+
+          const levels = [
+            { name: "متميز", min: 0.9, color: "#16a34a" },
+            { name: "متقدم", min: 0.8, color: "#2563eb" },
+            { name: "متمكن", min: 0.65, color: "#ca8a04" },
+            { name: "مقبول", min: 0.5, color: "#ea580c" },
+            { name: "غير مجتاز", min: 0, color: "#dc2626" },
+          ];
+          let levelCounts = [];
+          levels.forEach((lvl, i) => {
+            const lower = col.max * lvl.min;
+            const upper = i === 0 ? col.max + 1 : col.max * levels[i - 1].min;
+            const c = scores.filter((s) => s >= lower && s < upper).length;
+            levelCounts.push({ label: lvl.name, count: c, color: lvl.color });
+          });
+
+          // انشاء HTML الجدول ديناميكياً
+          let tableRows = levelCounts
+            .map(
+              (d) =>
+                `<tr class="border-b text-center"><td class="p-1 border-r-4 font-bold text-right" style="border-color:${d.color}">${d.label}</td><td class="p-1 font-bold">${d.count}</td><td class="p-1 text-slate-500">${((d.count / count) * 100).toFixed(1)}%</td></tr>`,
+            )
+            .join("");
+
+          const narrative =
+            `في اختبار <b>${col.name}</b>، الدرجة الكلية (<b>${col.max}</b>)، حقق الطلاب متوسطاً (<b>${mean}</b>) ونسبة اجتياز (<b>${passRate}%</b>). ` +
+            (passRate >= 75 ? "مستوى جيد." : "يحتاج تحسين.");
+
+          const pageDiv = document.createElement("div");
+          pageDiv.className = "print-page mt-4";
+
+          let footerHTML = "";
+          if (idx === scoreColumns.length - 1) {
+            footerHTML = `<div class="mt-8 border-t-2 border-black pt-4">${document.getElementById("mainFooter").innerHTML}</div>`;
+          } else {
+            footerHTML = `<div class="page-break"></div>`;
+          }
+
+          // هنا نستخدم كلاس force-row-print لضمان التجاور
+          pageDiv.innerHTML = `
+                <h2 class="text-center font-black text-xl mb-4 pb-2 border-b-2 border-slate-300 bg-slate-50 p-2 rounded">تقرير: ${col.name}</h2>
+                <div class="section-box border-t-4 border-blue-600 mt-2">
+                   <div class="grid grid-cols-4 gap-2 text-center text-sm mb-4">
+                      <div class="bg-slate-100 p-2 rounded border">المتوسط: <b>${mean}</b></div>
+                      <div class="bg-green-100 p-2 rounded border">الاجتياز: <b>${passRate}%</b></div>
+                      <div class="bg-orange-100 p-2 rounded border">الأعلى: <b>${scores[count - 1]}</b></div>
+                      <div class="bg-red-100 p-2 rounded border">الأقل: <b>${scores[0]}</b></div>
+                   </div>
+                </div>
+                
+                <div class="force-row-print mb-4">
+                    <div class="section-box h-full">
+                       <h3 class="font-bold text-black mb-2 border-r-4 border-blue-800 pr-2 text-sm">التمثيل البياني</h3>
+                       <div class="chart-container"></div>
+                    </div>
+                    <div class="section-box h-full">
+                        <h3 class="font-bold text-black mb-2 border-r-4 border-green-700 pr-2 text-sm">جدول التوزيع</h3>
+                        <table class="w-full text-xs border-collapse">
+                            <thead><tr class="bg-slate-100 text-slate-800"><th class="p-2 border">المستوى</th><th class="p-2 border">العدد</th><th class="p-2 border">النسبة</th></tr></thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                 <div class="section-box mt-4 p-3 bg-purple-50 border border-purple-200">
+                    <h4 class="font-bold text-purple-800 text-xs mb-1">التحليل الوصفي:</h4>
+                    <p class="text-xs text-justify leading-relaxed">${narrative}</p>
+                 </div>
+                 <div class="grid grid-cols-2 gap-4 mt-4">
+                    <div class="border p-2 rounded"><h4 class="font-bold text-green-700 mb-2 border-b">أعلى 5 طلاب</h4>
+                        <table class="w-full text-xs">${[...allStudentsData]
+                          .sort(
+                            (a, b) => b.scores[col.name] - a.scores[col.name],
+                          )
+                          .slice(0, 5)
+                          .map(
+                            (s) =>
+                              `<tr><td>${s.name}</td><td class="font-bold">${s.scores[col.name]}</td></tr>`,
+                          )
+                          .join("")}</table>
+                    </div>
+                    <div class="border p-2 rounded"><h4 class="font-bold text-red-700 mb-2 border-b">طلاب متعثرون</h4>
+                        <table class="w-full text-xs">${[...allStudentsData]
+                          .filter((s) => s.scores[col.name] < col.max * 0.5)
+                          .slice(0, 5)
+                          .map(
+                            (s) =>
+                              `<tr><td>${s.name}</td><td class="font-bold">${s.scores[col.name]}</td></tr>`,
+                          )
+                          .join("")}</table>
+                    </div>
+                 </div>
+                 ${footerHTML}`;
+
+          // إنشاء الكانفاس برمجياً
+          const canvas = document.createElement("canvas");
+          // Fix: Set explicit dimensions
+          canvas.width = 1200;
+          canvas.height = 400;
+          canvas.style.width = "100%";
+          canvas.style.height = "auto";
+          pageDiv.querySelector(".chart-container").appendChild(canvas);
+
+          overlay.appendChild(pageDiv);
+
+          // رسم الشارت فوراً
+          // رسم الشارت فوراً
+          new Chart(canvas, {
+            type: "bar",
+            data: {
+              labels: levelCounts.map((d) => d.label),
+              datasets: [
+                {
+                  data: levelCounts.map((d) => d.count),
+                  backgroundColor: levelCounts.map((d) => d.color),
+                },
+              ],
+            },
+            options: {
+              responsive: false, // Critical Fix: Disable responsiveness
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: {
+                legend: { display: false },
+                datalabels: { color: "#000", anchor: "end", align: "top" },
+              },
+              scales: {
+                y: { display: false },
+                x: { grid: { display: false } },
+              },
+            },
+            plugins: [ChartDataLabels],
+          });
+        });
+
+        // تفعيل الطباعة بعد اكتمال البناء
+        // Class 'print-all' was added at the start to allow rendering
+
+        // تأخير بسيط جداً للسماح للرسم بالظهور
+        setTimeout(() => {
+          window.print();
+          document.body.classList.remove("print-all");
+        }, 1500); // Increased timeout to ensure rendering
+      }
+    </script>
+  </body>
+</html>
